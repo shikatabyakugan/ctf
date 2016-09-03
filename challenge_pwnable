@@ -1,2 +1,0 @@
-The challenge a bit easy as the vulnerability doesn't required to trigger any overflow nor ROP. Since the binary implemented with system(), it allows us to overwrite username / input and execute command.
-
