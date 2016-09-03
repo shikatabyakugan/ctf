@@ -1,4 +1,6 @@
-1. Real size of vulnerable binary. It's indeed tiny!
+Solution of TINY (medium) exploitaion. The challenge quite complex and hard to exploit (trivial). Let's start inspecting the binary.
+
+Real size of vulnerable binary. It's indeed tiny! We don't seem much strings inside the binary except "ELF" which is the header of linux binary. 
 tiny@ubuntu:/tmp/babi$ hexdump -C ./tiny
 00000000  7f 45 4c 46 01 01 01 00  00 00 00 00 00 00 00 00  |.ELF............|
 00000010  02 00 03 00 01 00 00 00  74 80 04 08 34 00 00 00  |........t...4...|
