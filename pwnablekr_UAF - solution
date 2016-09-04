@@ -118,7 +118,7 @@ pointer give_shell      give_shell offset
  [0x401550 - 0x8]  --->   [0x0040117a]
 
 
- Our working exploit as in the following:
+ Our working exploit as in the following (https://github.com/shikatabyakugan/ctf/blob/master/pwnablekr_uaf_poc.sh):
 
  #!/bin/bash
 
