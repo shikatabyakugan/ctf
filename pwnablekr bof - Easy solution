@@ -2,6 +2,7 @@ This challenge quite straigh forward buffer overflow. Good thing is it shipped a
 
 	i. binary - http://pwnable.kr/bin/bof
 	ii. source code - http://pwnable.kr/bin/bof.c
+	iii. Our working exploit - https://github.com/shikatabyakugan/ctf/blob/master/pwnablekr_bof_easy.py
 
 
 Looking at the source code shows us a lot of hints. 
